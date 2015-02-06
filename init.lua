@@ -41,6 +41,9 @@ for _, t in pairs(types) do
   end
   
   m.clamp = t.libtensor_ext.clamp
+  m.clamp_min = t.libtensor_ext.clamp_min
+  m.clamp_max = t.libtensor_ext.clamp_max
+   
 end
   
   

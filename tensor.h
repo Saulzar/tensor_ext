@@ -53,10 +53,41 @@ struct clamp_functor
 };
 
 
+template<typename T>
+struct min_functor
+{
+  const T lower;
 
-void libtensor_Cuda_indexSum(THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src);
-void libtensor_Cuda_clamp(THCudaTensor *self_, THCudaTensor *src_, float lower, float upper);
-void libtensor_Cuda_mod(THCudaTensor *self_, THCudaTensor *src_, float p);
+  min_functor(T lower_) : lower(lower_) {}
+    __host__ __device__ T operator()(const T& x) const
+  {
+    return (x < lower) ? lower : x;
+  }
+};
+
+template<typename T>
+struct max_functor
+{
+  const T upper;
+
+  max_functor(T upper_) : upper(upper_) {}
+    __host__ __device__ T operator()(const T& x) const
+  {
+    return x > upper ? upper : x;
+  }
+};
+
+
+
+
+void libtensor_Cuda_max(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float upper);
+void libtensor_Cuda_min(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float lower);
+
+
+void libtensor_Cuda_indexSum(THCState *state, THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src);
+void libtensor_Cuda_clamp(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float lower, float upper);
+
+void libtensor_Cuda_mod(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float p);
   
   
   

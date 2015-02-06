@@ -15,7 +15,15 @@ inline void luaAssert (bool condition, const char *message) {
     throw std::invalid_argument(message);  
 }
 
-
+inline THCState* getCutorchState(lua_State* L)
+{
+    lua_getglobal(L, "cutorch");
+    lua_getfield(L, -1, "getState");
+    lua_call(L, 0, 1);
+    THCState *state = (THCState*) lua_touserdata(L, -1);
+    lua_pop(L, 2);
+    return state;
+}
 
 #define torch_(NAME) TH_CONCAT_3(torch_, Real, NAME)
 #define torch_Tensor        TH_CONCAT_STRING_3(torch.,Real,Tensor)

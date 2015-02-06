@@ -17,7 +17,8 @@ inline THTensor *libtensor_(checkTensor)(lua_State* L, int arg) {
   return (THTensor*)luaT_checkudata(L, arg, torch_Tensor);  
 }
 
-void libtensor_(indexSum)(THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
+
+void libtensor_(indexSum)(THCState *state, THTensor *tensor, int dim, THLongTensor *index, THTensor *src)
 {
   long i, numel;
   THTensor *tSlice, *sSlice;
@@ -54,7 +55,7 @@ void libtensor_(indexSum)(THTensor *tensor, int dim, THLongTensor *index, THTens
 
 
 template<typename Op>
-void libtensor_(transform)(THTensor *r_, THTensor *t, Op const &op)
+void libtensor_(transform)(THCState *state, THTensor *r_, THTensor *t, Op const &op)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
@@ -76,18 +77,47 @@ void libtensor_(transform)(THTensor *r_, THTensor *t, Op const &op)
 
 
 
-void libtensor_(clamp)(THTensor *r_, THTensor *t, real min_value, real max_value) {
-  libtensor_(transform)(r_, t, clamp_functor<real>(min_value, max_value));
+void libtensor_(clamp)(THCState *state, THTensor *r_, THTensor *t, real min_value, real max_value) {
+    libtensor_(transform)(state, r_, t, clamp_functor<real>(min_value, max_value));
 }
 
-void libtensor_(mod)(THTensor *r_, THTensor *t, real p) {
-  libtensor_(transform)(r_, t, mod_functor<real>(p));
+
+void libtensor_(min)(THCState *state, THTensor *r_, THTensor *t, real min_value) {
+    libtensor_(transform)(state, r_, t, min_functor<real>(min_value));
+}
+
+
+void libtensor_(max)(THCState *state, THTensor *r_, THTensor *t, real max_value) {
+    libtensor_(transform)(state, r_, t, min_functor<real>(max_value));
+}
+
+
+
+void libtensor_(mod)(THCState *state, THTensor *r_, THTensor *t, real p) {
+  libtensor_(transform)(state, r_, t, mod_functor<real>(p));
+}
+
+
+inline void pushTensor(THCState *, lua_State* L, THTensor *t) {  
+  THTensor_(retain)(t);
+  luaT_pushudata(L, t, torch_Tensor);
+}
+
+#else 
+
+inline void pushTensor(THCState *state, lua_State* L, THTensor *t) {  
+  THTensor_(retain)(state, t);
+  luaT_pushudata(L, t, torch_Tensor);
 }
 
 #endif
 
 
+
+
 static int libtensor_(luaMod)(lua_State *L) {
+  
+  THCState *state = getCutorchState(L);
   
   int narg = lua_gettop(L);
   if(!(narg == 2 || narg == 3)) {
@@ -100,16 +130,17 @@ static int libtensor_(luaMod)(lua_State *L) {
   real p = lua_tonumber(L, narg);
   THArgCheck(p > 0, narg, "mod: divisor must be > 0");
   
-  libtensor_(mod)(r_, t, p);
-  
-  THTensor_(retain)(r_);
-  luaT_pushudata(L, r_, torch_Tensor);
+  libtensor_(mod)(state, r_, t, p);
+  pushTensor(state, L, r_);
   
   return 1;
 }
 
 
 static int libtensor_(luaClamp)(lua_State *L) {
+  
+  THCState *state = getCutorchState(L);
+
   
   int narg = lua_gettop(L);
   
@@ -124,16 +155,63 @@ static int libtensor_(luaClamp)(lua_State *L) {
   real max_value = lua_tonumber(L, narg);       
 
 
-  libtensor_(clamp)(r_, t, min_value, max_value);
-  
-  THTensor_(retain)(r_);
-  luaT_pushudata(L, r_, torch_Tensor);
+  libtensor_(clamp)(state, r_, t, min_value, max_value);  
+  pushTensor(state, L, r_);
+
   
   return 1;
 }
 
+
+
+static int libtensor_(luaClampMin)(lua_State *L) {
+  
+  THCState *state = getCutorchState(L);
+
+  int narg = lua_gettop(L);
+  
+  if(!(narg == 2 || narg == 3)) {
+    luaL_error(L, "clamp_min: expected 2 or 3 arguments"); 
+  }
+  
+  THTensor *r_ =   (THTensor*)luaT_checkudata(L, 1, torch_Tensor);
+  THTensor *t =   (THTensor*)luaT_checkudata(L, narg - 1, torch_Tensor);
+
+  real min_value = lua_tonumber(L, narg);
+
+  libtensor_(min)(state, r_, t, min_value);  
+  pushTensor(state, L, r_);
+  
+  return 1;
+}
+
+
+static int libtensor_(luaClampMax)(lua_State *L) {
+  
+  THCState *state = getCutorchState(L);
+  
+  int narg = lua_gettop(L);
+  
+  if(!(narg == 2 || narg == 3)) {
+    luaL_error(L, "clamp_max: expected 2 or 3 arguments"); 
+  }
+  
+  THTensor *r_ =   (THTensor*)luaT_checkudata(L, 1, torch_Tensor);
+  THTensor *t =   (THTensor*)luaT_checkudata(L, narg - 1, torch_Tensor);
+
+  real max_value = lua_tonumber(L, narg);
+
+  libtensor_(max)(state, r_, t, max_value);  
+  pushTensor(state, L, r_);
+  
+  return 1;
+}
+
+
 static int libtensor_(luaIndexSum)(lua_State* L) {
-     
+  
+  THCState *state = getCutorchState(L);
+  
   int args = lua_gettop(L);
   if(args < 4) {
     luaL_error(L, "indexSum: expected 4 arguments"); 
@@ -145,10 +223,8 @@ static int libtensor_(luaIndexSum)(lua_State* L) {
   THTensor *src =   (THTensor*)luaT_checkudata(L, 4, torch_Tensor);  
   
     
-  libtensor_(indexSum)(r_, dim, index, src);  
-  
-  THTensor_(retain)(r_);
-  luaT_pushudata(L, r_, torch_Tensor); 
+  libtensor_(indexSum)(state, r_, dim, index, src);    
+  pushTensor(state, L, r_);
   
   
   return 1;
@@ -161,6 +237,8 @@ static const luaL_reg libtensor_(Main__) [] =
 {
   {"indexSum", libtensor_(luaIndexSum)},
   {"clamp", libtensor_(luaClamp)},
+  {"clamp_min", libtensor_(luaClampMin)},
+  {"clamp_max", libtensor_(luaClampMax)},
   {"mod", libtensor_(luaMod)},
   {NULL, NULL}  /* sentinel */
 };

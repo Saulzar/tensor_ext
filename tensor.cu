@@ -16,6 +16,9 @@
 #include <sstream>
 
 
+
+
+
 #define cudaAssert(ans) { cudaAssert_((ans), __FILE__, __LINE__); }
 inline void cudaAssert_(cudaError_t code, const char *file, int line)
 {
@@ -74,7 +77,7 @@ __global__ void kernel_indexReduce(
 }
 
 template<typename Op>
-void indexReduce(THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src, Op const &op)
+void indexReduce(THCState *state, THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src, Op const &op)
 {
   THCudaTensor *indices_;
   long *stride_;
@@ -86,11 +89,11 @@ void indexReduce(THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTenso
   THArgCheck(src->nDimension > 0, 2, "Source tensor is empty");
   THArgCheck(nIndex == src->size[dim], 4, "length of src.size[dim] is not equal to length of indices");
 
-  src = THCudaTensor_newContiguous(src);
-  indices_ = THCudaTensor_newWithSize1d(nIndex);
-  THCudaTensor_copyLong(indices_, indices);
+  src = THCudaTensor_newContiguous(state, src);
+  indices_ = THCudaTensor_newWithSize1d(state, nIndex);
+  THCudaTensor_copyLong(state, indices_, indices);
 
-  nSrc = THCudaTensor_nElement(src);
+  nSrc = THCudaTensor_nElement(state, src);
   
   const int size = 16;
   dim3 nthreads(size, size);
@@ -101,32 +104,32 @@ void indexReduce(THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTenso
   THCudaCheck(cudaMemcpy(stride_, res_->stride, res_->nDimension * sizeof(long), cudaMemcpyHostToDevice));
 
   kernel_indexReduce<<<nblocks, nthreads>>>(
-    THCudaTensor_data(res_), THCudaTensor_data(src),
-    stride_, THCudaTensor_data(indices_),
+    THCudaTensor_data(state, res_), THCudaTensor_data(state, src),
+    stride_, THCudaTensor_data(state, indices_),
     res_->nDimension, dim, nIndex,
-    THCudaTensor_nElement(src), res_->size[dim], op
+    THCudaTensor_nElement(state, src), res_->size[dim], op
   );
 
   THCudaCheck(cudaFree(stride_));
-  THCudaTensor_free(indices_);
-  THCudaTensor_free(src);
+  THCudaTensor_free(state, indices_);
+  THCudaTensor_free(state, src);
 }
 
 
 template<typename Op>
-void transform(THCudaTensor *self_, THCudaTensor *src_, Op const &op)
+void transform(THCState * state, THCudaTensor *self_, THCudaTensor *src_, Op const &op)
 {
-  THCudaTensor_resizeAs(self_, src_);
-  THCudaTensor *self = THCudaTensor_newContiguous(self_);
-  THCudaTensor *src = THCudaTensor_newContiguous(src_);
-  long size = THCudaTensor_nElement(self);
-  thrust::device_ptr<float> self_data(THCudaTensor_data(self));
-  thrust::device_ptr<float> src_data(THCudaTensor_data(src));
+  THCudaTensor_resizeAs(state, self_, src_);
+  THCudaTensor *self = THCudaTensor_newContiguous(state, self_);
+  THCudaTensor *src = THCudaTensor_newContiguous(state, src_);
+  long size = THCudaTensor_nElement(state, self);
+  thrust::device_ptr<float> self_data(THCudaTensor_data(state, self));
+  thrust::device_ptr<float> src_data(THCudaTensor_data(state, src));
 
   thrust::transform(src_data, src_data+size, self_data, op);
 
-  THCudaTensor_free(src);
-  THCudaTensor_freeCopyTo(self, self_);
+  THCudaTensor_free(state, src);
+  THCudaTensor_freeCopyTo(state, self, self_);
 }
 
 
@@ -140,17 +143,27 @@ struct add_functor {
 
 
 
-void libtensor_Cuda_clamp(THCudaTensor *self_, THCudaTensor *src_, float lower, float upper) {
-  transform(self_, src_, clamp_functor<float>(lower, upper));
-}
-
-void libtensor_Cuda_mod(THCudaTensor *self_, THCudaTensor *src_, float p) {
-  transform(self_, src_, mod_functor<float>(p));
+void libtensor_Cuda_clamp(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float lower, float upper) {
+  transform(state, self_, src_, clamp_functor<float>(lower, upper));
 }
 
 
-void libtensor_Cuda_indexSum(THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src) {
-  indexReduce(res_, dim, indices, src, add_functor());
+void libtensor_Cuda_min(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float lower) {
+  transform(state, self_, src_, min_functor<float>(lower));
+}
+
+void libtensor_Cuda_max(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float upper) {
+  transform(state, self_, src_, max_functor<float>(upper));
+}
+
+
+void libtensor_Cuda_mod(THCState *state, THCudaTensor *self_, THCudaTensor *src_, float p) {
+  transform(state, self_, src_, mod_functor<float>(p));
+}
+
+
+void libtensor_Cuda_indexSum(THCState *state, THCudaTensor *res_, int dim, THLongTensor *indices, THCudaTensor *src) {
+  indexReduce(state, res_, dim, indices, src, add_functor());
 }
 
 
